@@ -19,6 +19,7 @@ uint8_t square_ids[64];
 int selected_row = -1;
 int selected_col = -1;
 bool white_turn = true;
+bool game_over = false;
 const char *status_message = "White to move";
 
 char board[8][8] = {
@@ -123,7 +124,21 @@ bool is_legal_pawn_move(char piece, int from_row, int from_col, int to_row, int 
   return false;
 }
 
-bool is_legal_move(int from_row, int from_col, int to_row, int to_col) {
+bool find_king(bool white, int *king_row, int *king_col) {
+  const char king = white ? 'K' : 'k';
+  for (int row = 0; row < 8; ++row) {
+    for (int col = 0; col < 8; ++col) {
+      if (board[row][col] == king) {
+        *king_row = row;
+        *king_col = col;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool is_legal_basic_move(int from_row, int from_col, int to_row, int to_col) {
   const char piece = board[from_row][from_col];
   const char target = board[to_row][to_col];
   const int row_delta = to_row - from_row;
@@ -136,6 +151,10 @@ bool is_legal_move(int from_row, int from_col, int to_row, int to_col) {
   }
 
   if (target != '.' && same_side(piece, target)) {
+    return false;
+  }
+
+  if (lower_piece(target) == 'k') {
     return false;
   }
 
@@ -156,6 +175,103 @@ bool is_legal_move(int from_row, int from_col, int to_row, int to_col) {
   default:
     return false;
   }
+}
+
+bool piece_attacks_square(int from_row, int from_col, int to_row, int to_col) {
+  const char piece = board[from_row][from_col];
+  const int row_delta = to_row - from_row;
+  const int col_delta = to_col - from_col;
+  const int abs_row = abs_int(row_delta);
+  const int abs_col = abs_int(col_delta);
+
+  if (piece == '.' || (from_row == to_row && from_col == to_col)) {
+    return false;
+  }
+
+  switch (lower_piece(piece)) {
+  case 'p': {
+    const int direction = is_white_piece(piece) ? -1 : 1;
+    return row_delta == direction && abs_col == 1;
+  }
+  case 'r':
+    return (row_delta == 0 || col_delta == 0) && is_path_clear(from_row, from_col, to_row, to_col);
+  case 'n':
+    return (abs_row == 2 && abs_col == 1) || (abs_row == 1 && abs_col == 2);
+  case 'b':
+    return abs_row == abs_col && is_path_clear(from_row, from_col, to_row, to_col);
+  case 'q':
+    return ((row_delta == 0 || col_delta == 0) || (abs_row == abs_col)) &&
+           is_path_clear(from_row, from_col, to_row, to_col);
+  case 'k':
+    return abs_row <= 1 && abs_col <= 1;
+  default:
+    return false;
+  }
+}
+
+bool is_square_attacked(int row, int col, bool by_white) {
+  for (int from_row = 0; from_row < 8; ++from_row) {
+    for (int from_col = 0; from_col < 8; ++from_col) {
+      const char piece = board[from_row][from_col];
+      if (piece == '.') {
+        continue;
+      }
+      if (by_white != is_white_piece(piece)) {
+        continue;
+      }
+      if (piece_attacks_square(from_row, from_col, row, col)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool is_in_check(bool white) {
+  int king_row = -1;
+  int king_col = -1;
+  if (!find_king(white, &king_row, &king_col)) {
+    return true;
+  }
+  return is_square_attacked(king_row, king_col, !white);
+}
+
+bool would_leave_king_in_check(int from_row, int from_col, int to_row, int to_col) {
+  const char moving_piece = board[from_row][from_col];
+  const char captured_piece = board[to_row][to_col];
+  const bool moving_white = is_white_piece(moving_piece);
+
+  board[to_row][to_col] = moving_piece;
+  board[from_row][from_col] = '.';
+  const bool in_check = is_in_check(moving_white);
+  board[from_row][from_col] = moving_piece;
+  board[to_row][to_col] = captured_piece;
+
+  return in_check;
+}
+
+bool is_legal_move(int from_row, int from_col, int to_row, int to_col) {
+  return is_legal_basic_move(from_row, from_col, to_row, to_col) &&
+         !would_leave_king_in_check(from_row, from_col, to_row, to_col);
+}
+
+bool has_any_legal_move(bool white) {
+  for (int from_row = 0; from_row < 8; ++from_row) {
+    for (int from_col = 0; from_col < 8; ++from_col) {
+      const char piece = board[from_row][from_col];
+      if (piece == '.' || is_white_piece(piece) != white) {
+        continue;
+      }
+      for (int to_row = 0; to_row < 8; ++to_row) {
+        for (int to_col = 0; to_col < 8; ++to_col) {
+          if (is_legal_move(from_row, from_col, to_row, to_col)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
 }
 
 bool has_selection() {
@@ -234,7 +350,11 @@ void clear_selection() {
 }
 
 void set_turn_status() {
-  status_message = white_turn ? "White to move" : "Black to move";
+  if (is_in_check(white_turn)) {
+    status_message = white_turn ? "White in check" : "Black in check";
+  } else {
+    status_message = white_turn ? "White to move" : "Black to move";
+  }
 }
 
 void select_square(int row, int col) {
@@ -248,10 +368,25 @@ void move_piece(int from_row, int from_col, int to_row, int to_col) {
   board[from_row][from_col] = '.';
   white_turn = !white_turn;
   clear_selection();
-  set_turn_status();
+
+  const bool in_check = is_in_check(white_turn);
+  const bool has_move = has_any_legal_move(white_turn);
+  if (!has_move && in_check) {
+    game_over = true;
+    status_message = white_turn ? "Checkmate - Black wins" : "Checkmate - White wins";
+  } else if (!has_move) {
+    game_over = true;
+    status_message = "Stalemate - Draw";
+  } else {
+    set_turn_status();
+  }
 }
 
 void on_square_clicked(lv_event_t *event) {
+  if (game_over) {
+    return;
+  }
+
   const auto id = *static_cast<uint8_t *>(lv_event_get_user_data(event));
   const int row = id / 8;
   const int col = id % 8;
