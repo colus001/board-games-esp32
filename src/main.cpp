@@ -2,17 +2,21 @@
 #include <esp32_smartdisplay.h>
 #include <lvgl.h>
 
+LV_FONT_DECLARE(chess_symbols_42);
+
 namespace {
 constexpr int kScreenPixels = 480;
-constexpr int kStatusHeight = 36;
-constexpr int kBoardPixels = kScreenPixels - kStatusHeight;
+constexpr int kStatusHeight = 24;
+constexpr int kBoardPixels = 456;
 constexpr int kSquarePixels = kBoardPixels / 8;
 constexpr int kBoardOffsetX = (kScreenPixels - kBoardPixels) / 2;
 constexpr int kBoardOffsetY = 0;
 
+lv_obj_t *board_frame = nullptr;
 lv_obj_t *squares[8][8];
-lv_obj_t *piece_badges[8][8];
 lv_obj_t *piece_labels[8][8];
+lv_obj_t *rank_labels[8];
+lv_obj_t *file_labels[8];
 lv_obj_t *status_label = nullptr;
 uint8_t square_ids[64];
 
@@ -75,14 +79,34 @@ int sign_int(int value) {
 }
 
 const char *piece_text(char piece) {
-  static char text[2];
-  if (piece == '.') {
+  switch (piece) {
+  case 'K':
+    return "♔";
+  case 'Q':
+    return "♕";
+  case 'R':
+    return "♖";
+  case 'B':
+    return "♗";
+  case 'N':
+    return "♘";
+  case 'P':
+    return "♙";
+  case 'k':
+    return "♚";
+  case 'q':
+    return "♛";
+  case 'r':
+    return "♜";
+  case 'b':
+    return "♝";
+  case 'n':
+    return "♞";
+  case 'p':
+    return "♟";
+  default:
     return "";
   }
-
-  text[0] = piece;
-  text[1] = '\0';
-  return text;
 }
 
 bool is_path_clear(int from_row, int from_col, int to_row, int to_col) {
@@ -291,48 +315,44 @@ void paint_square(int row, int col) {
   const bool legal_destination = is_legal_destination(row, col);
   const bool capture_destination = legal_destination && board[row][col] != '.';
   const lv_color_t color = selected
-                               ? lv_color_hex(0xFFE066)
+                               ? lv_color_hex(0xF4C95D)
                                : capture_destination
-                                     ? lv_color_hex(0xFCA5A5)
+                                     ? lv_color_hex(0xC97064)
                                : legal_destination
-                                     ? lv_color_hex(0xBBF7D0)
+                                     ? lv_color_hex(0xA6C48A)
                                : is_light_square(row, col)
-                                     ? lv_color_hex(0xF3E7C9)
-                                     : lv_color_hex(0xB88758);
+                                     ? lv_color_hex(0xEEEED2)
+                                     : lv_color_hex(0x4F7EA5);
 
   lv_obj_set_style_bg_color(squares[row][col], color, LV_PART_MAIN);
-  lv_obj_set_style_border_width(squares[row][col], selected ? 5 : capture_destination ? 4 : legal_destination ? 3 : 1, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(squares[row][col], LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(squares[row][col], selected ? 4 : capture_destination ? 3 : legal_destination ? 3 : 0, LV_PART_MAIN);
   lv_obj_set_style_border_color(squares[row][col],
-                                selected          ? lv_color_hex(0x00D1FF)
-                                : capture_destination ? lv_color_hex(0xE11D48)
-                                : legal_destination   ? lv_color_hex(0x16A34A)
-                                                      : lv_color_hex(0x000000),
+                                selected              ? lv_color_hex(0x083344)
+                                : capture_destination ? lv_color_hex(0x7F1D1D)
+                                : legal_destination   ? lv_color_hex(0x14532D)
+                                                       : lv_color_hex(0x3A2416),
                                 LV_PART_MAIN);
   lv_obj_set_style_border_opa(squares[row][col], (selected || legal_destination) ? LV_OPA_COVER : LV_OPA_20, LV_PART_MAIN);
 
   const char piece = board[row][col];
-  const bool has_piece = piece != '.';
   const bool white_piece = is_white_piece(piece);
-
-  if (has_piece) {
-    lv_obj_remove_flag(piece_badges[row][col], LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_bg_color(piece_badges[row][col],
-                              selected ? lv_color_hex(0x0F766E) : white_piece ? lv_color_hex(0x1F2937) : lv_color_hex(0xFFF3D6),
-                              LV_PART_MAIN);
-    lv_obj_set_style_border_color(piece_badges[row][col],
-                                  selected ? lv_color_hex(0xCCFBF1) : white_piece ? lv_color_hex(0xF8FAFC) : lv_color_hex(0x111827),
-                                  LV_PART_MAIN);
-    lv_obj_set_style_border_width(piece_badges[row][col], selected ? 4 : 2, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(piece_badges[row][col], selected ? 16 : 8, LV_PART_MAIN);
-    lv_obj_set_style_shadow_opa(piece_badges[row][col], selected ? LV_OPA_60 : LV_OPA_30, LV_PART_MAIN);
-  } else {
-    lv_obj_add_flag(piece_badges[row][col], LV_OBJ_FLAG_HIDDEN);
-  }
 
   lv_label_set_text(piece_labels[row][col], piece_text(piece));
   lv_obj_set_style_text_color(piece_labels[row][col],
-                              white_piece ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x050505),
+                              white_piece ? lv_color_hex(0xFFD166) : lv_color_hex(0x1F2933),
                               LV_PART_MAIN);
+
+  if (col == 0) {
+    lv_obj_set_style_text_color(rank_labels[row],
+                                is_light_square(row, col) ? lv_color_hex(0x4F7EA5) : lv_color_hex(0xEEEED2),
+                                LV_PART_MAIN);
+  }
+  if (row == 7) {
+    lv_obj_set_style_text_color(file_labels[col],
+                                is_light_square(row, col) ? lv_color_hex(0x4F7EA5) : lv_color_hex(0xEEEED2),
+                                LV_PART_MAIN);
+  }
 }
 
 void repaint_board() {
@@ -432,45 +452,60 @@ void create_chessboard() {
 
   lv_obj_t *screen = lv_screen_active();
   lv_obj_clean(screen);
-  lv_obj_set_style_bg_color(screen, lv_color_hex(0x111827), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(screen, lv_color_hex(0x2F4F3D), LV_PART_MAIN);
+
+  board_frame = lv_obj_create(screen);
+  lv_obj_remove_style_all(board_frame);
+  lv_obj_set_size(board_frame, kBoardPixels, kBoardPixels);
+  lv_obj_set_pos(board_frame, kBoardOffsetX, kBoardOffsetY);
+  lv_obj_set_style_bg_color(board_frame, lv_color_hex(0xEEEED2), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(board_frame, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(board_frame, 0, LV_PART_MAIN);
+  lv_obj_remove_flag(board_frame, LV_OBJ_FLAG_CLICKABLE);
 
   for (int row = 0; row < 8; ++row) {
     for (int col = 0; col < 8; ++col) {
       const int id = row * 8 + col;
       square_ids[id] = id;
 
-      lv_obj_t *square = lv_obj_create(screen);
+      lv_obj_t *square = lv_obj_create(board_frame);
       squares[row][col] = square;
       lv_obj_remove_style_all(square);
       lv_obj_set_size(square, kSquarePixels, kSquarePixels);
-      lv_obj_set_pos(square, kBoardOffsetX + col * kSquarePixels, kBoardOffsetY + row * kSquarePixels);
+      lv_obj_set_pos(square, col * kSquarePixels, row * kSquarePixels);
+      lv_obj_set_style_radius(square, 0, LV_PART_MAIN);
       lv_obj_add_flag(square, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_add_event_cb(square, on_square_clicked, LV_EVENT_CLICKED, &square_ids[id]);
 
-      lv_obj_t *badge = lv_obj_create(square);
-      piece_badges[row][col] = badge;
-      lv_obj_remove_style_all(badge);
-      lv_obj_set_size(badge, 44, 44);
-      lv_obj_center(badge);
-      lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-      lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, LV_PART_MAIN);
-      lv_obj_set_style_border_width(badge, 2, LV_PART_MAIN);
-      lv_obj_set_style_shadow_width(badge, 8, LV_PART_MAIN);
-      lv_obj_set_style_shadow_opa(badge, LV_OPA_30, LV_PART_MAIN);
-      lv_obj_set_style_shadow_color(badge, lv_color_hex(0x000000), LV_PART_MAIN);
-      lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE);
-
-      lv_obj_t *label = lv_label_create(badge);
+      lv_obj_t *label = lv_label_create(square);
       piece_labels[row][col] = label;
-      lv_obj_set_style_text_font(label, &lv_font_montserrat_28, LV_PART_MAIN);
+      lv_obj_set_style_text_font(label, &chess_symbols_42, LV_PART_MAIN);
       lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_center(label);
+
+      if (col == 0) {
+        lv_obj_t *rank = lv_label_create(square);
+        rank_labels[row] = rank;
+        lv_label_set_text_fmt(rank, "%d", 8 - row);
+        lv_obj_set_style_text_font(rank, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_align(rank, LV_ALIGN_TOP_LEFT, 3, 1);
+        lv_obj_remove_flag(rank, LV_OBJ_FLAG_CLICKABLE);
+      }
+
+      if (row == 7) {
+        lv_obj_t *file = lv_label_create(square);
+        file_labels[col] = file;
+        lv_label_set_text_fmt(file, "%c", 'a' + col);
+        lv_obj_set_style_text_font(file, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_align(file, LV_ALIGN_BOTTOM_RIGHT, -3, -1);
+        lv_obj_remove_flag(file, LV_OBJ_FLAG_CLICKABLE);
+      }
     }
   }
 
   status_label = lv_label_create(screen);
   lv_obj_set_width(status_label, kScreenPixels);
-  lv_obj_set_style_bg_color(status_label, lv_color_hex(0x111827), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_label, lv_color_hex(0x2F4F3D), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_label, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_text_color(status_label, lv_color_hex(0xF8FAFC), LV_PART_MAIN);
   lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
