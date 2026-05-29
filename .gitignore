@@ -1,0 +1,8 @@
+.pio/
+.DS_Store
+*.log
+
+# Vendored Sunton board definitions: keep only the board used by this project.
+boards/*
+!boards/LICENSE.txt
+!boards/esp32-4848S040CIY1.json
