@@ -21,13 +21,18 @@ lv_obj_t *file_labels[8];
 lv_obj_t *status_label = nullptr;
 uint8_t square_ids[64];
 
+void show_start_screen();
+void create_chessboard();
+
 int selected_row = -1;
 int selected_col = -1;
 bool white_turn = true;
 bool game_over = false;
 const char *status_message = "White to move";
+const char *game_over_title = "Game Over";
+const char *game_over_subtitle = "";
 
-char board[8][8] = {
+const char kInitialBoard[8][8] = {
     {'r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'},
     {'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'},
     {'.', '.', '.', '.', '.', '.', '.', '.'},
@@ -37,6 +42,28 @@ char board[8][8] = {
     {'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'},
     {'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'},
 };
+
+char board[8][8];
+
+void reset_game() {
+  for (int row = 0; row < 8; ++row) {
+    for (int col = 0; col < 8; ++col) {
+      board[row][col] = kInitialBoard[row][col];
+    }
+  }
+  selected_row = -1;
+  selected_col = -1;
+  white_turn = true;
+  game_over = false;
+  status_message = "White to move";
+  game_over_title = "Game Over";
+  game_over_subtitle = "";
+}
+
+void start_new_game() {
+  reset_game();
+  create_chessboard();
+}
 
 bool is_light_square(int row, int col) {
   return ((row + col) % 2) == 0;
@@ -405,13 +432,92 @@ void move_piece(int from_row, int from_col, int to_row, int to_col) {
   const bool has_move = has_any_legal_move(white_turn);
   if (!has_move && in_check) {
     game_over = true;
+    game_over_title = "Checkmate";
+    game_over_subtitle = white_turn ? "Black wins" : "White wins";
     status_message = white_turn ? "Checkmate - Black wins" : "Checkmate - White wins";
   } else if (!has_move) {
     game_over = true;
+    game_over_title = "Stalemate";
+    game_over_subtitle = "Draw";
     status_message = "Stalemate - Draw";
   } else {
     set_turn_status();
   }
+}
+
+void on_start_clicked(lv_event_t *event) {
+  (void)event;
+  start_new_game();
+}
+
+void on_new_game_clicked(lv_event_t *event) {
+  (void)event;
+  start_new_game();
+}
+
+void on_title_clicked(lv_event_t *event) {
+  (void)event;
+  reset_game();
+  show_start_screen();
+}
+
+lv_obj_t *create_menu_button(lv_obj_t *parent, const char *text, int width, int height) {
+  lv_obj_t *button = lv_button_create(parent);
+  lv_obj_remove_style_all(button);
+  lv_obj_set_size(button, width, height);
+  lv_obj_set_style_radius(button, 12, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(button, lv_color_hex(0x5E7B62), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(button, 2, LV_PART_MAIN);
+  lv_obj_set_style_border_color(button, lv_color_hex(0xD7C59A), LV_PART_MAIN);
+
+  lv_obj_t *label = lv_label_create(button);
+  lv_label_set_text(label, text);
+  lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(label, lv_color_hex(0xF8F1DC), LV_PART_MAIN);
+  lv_obj_center(label);
+  return button;
+}
+
+void show_game_over_overlay() {
+  lv_obj_t *screen = lv_screen_active();
+  lv_obj_t *overlay = lv_obj_create(screen);
+  lv_obj_remove_style_all(overlay);
+  lv_obj_set_size(overlay, kScreenPixels, kScreenPixels);
+  lv_obj_set_pos(overlay, 0, 0);
+  lv_obj_set_style_bg_color(overlay, lv_color_hex(0x11110F), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(overlay, LV_OPA_60, LV_PART_MAIN);
+  lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *panel = lv_obj_create(overlay);
+  lv_obj_remove_style_all(panel);
+  lv_obj_set_size(panel, 348, 224);
+  lv_obj_center(panel);
+  lv_obj_set_style_radius(panel, 20, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(panel, lv_color_hex(0xF1E1BB), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(panel, 4, LV_PART_MAIN);
+  lv_obj_set_style_border_color(panel, lv_color_hex(0x5E7B62), LV_PART_MAIN);
+
+  lv_obj_t *title = lv_label_create(panel);
+  lv_label_set_text(title, game_over_title);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);
+  lv_obj_set_style_text_color(title, lv_color_hex(0x263526), LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 22);
+
+  lv_obj_t *subtitle = lv_label_create(panel);
+  lv_label_set_text(subtitle, game_over_subtitle);
+  lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(subtitle, lv_color_hex(0x5E3F2A), LV_PART_MAIN);
+  lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 66);
+
+  lv_obj_t *new_game = create_menu_button(panel, "New Game", 142, 52);
+  lv_obj_align(new_game, LV_ALIGN_BOTTOM_LEFT, 26, -24);
+  lv_obj_add_event_cb(new_game, on_new_game_clicked, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *title_button = create_menu_button(panel, "Title", 142, 52);
+  lv_obj_align(title_button, LV_ALIGN_BOTTOM_RIGHT, -26, -24);
+  lv_obj_add_event_cb(title_button, on_title_clicked, LV_EVENT_CLICKED, nullptr);
 }
 
 void on_square_clicked(lv_event_t *event) {
@@ -454,6 +560,53 @@ void on_square_clicked(lv_event_t *event) {
   }
 
   repaint_board();
+  if (game_over) {
+    show_game_over_overlay();
+  }
+}
+
+void show_start_screen() {
+  lv_obj_t *screen = lv_screen_active();
+  lv_obj_clean(screen);
+  lv_obj_set_style_bg_color(screen, lv_color_hex(0x2F4F3D), LV_PART_MAIN);
+
+  lv_obj_t *card = lv_obj_create(screen);
+  lv_obj_remove_style_all(card);
+  lv_obj_set_size(card, 392, 360);
+  lv_obj_center(card);
+  lv_obj_set_style_radius(card, 24, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(card, lv_color_hex(0xF1E1BB), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(card, 4, LV_PART_MAIN);
+  lv_obj_set_style_border_color(card, lv_color_hex(0xB98B61), LV_PART_MAIN);
+
+  lv_obj_t *title = lv_label_create(card);
+  lv_label_set_text(title, "Local Chess");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);
+  lv_obj_set_style_text_color(title, lv_color_hex(0x263526), LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 36);
+
+  lv_obj_t *subtitle = lv_label_create(card);
+  lv_label_set_text(subtitle, "Two-player chess on ESP32");
+  lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(subtitle, lv_color_hex(0x5E3F2A), LV_PART_MAIN);
+  lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 86);
+
+  lv_obj_t *pieces = lv_label_create(card);
+  lv_label_set_text(pieces, "♔♕♖♚♛♜");
+  lv_obj_set_style_text_font(pieces, &chess_symbols_42, LV_PART_MAIN);
+  lv_obj_set_style_text_color(pieces, lv_color_hex(0x263526), LV_PART_MAIN);
+  lv_obj_align(pieces, LV_ALIGN_TOP_MID, 0, 136);
+
+  lv_obj_t *start = create_menu_button(card, "Start Game", 210, 58);
+  lv_obj_align(start, LV_ALIGN_TOP_MID, 0, 218);
+  lv_obj_add_event_cb(start, on_start_clicked, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *hint = lv_label_create(card);
+  lv_label_set_text(hint, "White moves first");
+  lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_color(hint, lv_color_hex(0x5E7B62), LV_PART_MAIN);
+  lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -24);
 }
 
 void create_chessboard() {
@@ -545,7 +698,8 @@ void setup() {
   auto display = lv_display_get_default();
   lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);
 
-  create_chessboard();
+  reset_game();
+  show_start_screen();
 }
 
 void loop() {
