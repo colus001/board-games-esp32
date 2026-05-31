@@ -14,6 +14,7 @@ constexpr int kBoardOffsetY = 0;
 
 lv_obj_t *board_frame = nullptr;
 lv_obj_t *squares[8][8];
+lv_obj_t *move_markers[8][8];
 lv_obj_t *piece_labels[8][8];
 lv_obj_t *rank_labels[8];
 lv_obj_t *file_labels[8];
@@ -314,26 +315,37 @@ void paint_square(int row, int col) {
   const bool selected = row == selected_row && col == selected_col;
   const bool legal_destination = is_legal_destination(row, col);
   const bool capture_destination = legal_destination && board[row][col] != '.';
+  const bool light_square = is_light_square(row, col);
   const lv_color_t color = selected
-                               ? lv_color_hex(0xF4C95D)
-                               : capture_destination
-                                     ? lv_color_hex(0xC97064)
-                               : legal_destination
-                                     ? lv_color_hex(0xA6C48A)
-                               : is_light_square(row, col)
+                               ? light_square ? lv_color_hex(0xC9D19D) : lv_color_hex(0x6F8C70)
+                               : light_square
                                      ? lv_color_hex(0xEEEED2)
                                      : lv_color_hex(0x4F7EA5);
 
   lv_obj_set_style_bg_color(squares[row][col], color, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(squares[row][col], LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(squares[row][col], selected ? 4 : capture_destination ? 3 : legal_destination ? 3 : 0, LV_PART_MAIN);
-  lv_obj_set_style_border_color(squares[row][col],
-                                selected              ? lv_color_hex(0x083344)
-                                : capture_destination ? lv_color_hex(0x7F1D1D)
-                                : legal_destination   ? lv_color_hex(0x14532D)
-                                                       : lv_color_hex(0x3A2416),
-                                LV_PART_MAIN);
-  lv_obj_set_style_border_opa(squares[row][col], (selected || legal_destination) ? LV_OPA_COVER : LV_OPA_20, LV_PART_MAIN);
+  lv_obj_set_style_border_width(squares[row][col], 0, LV_PART_MAIN);
+
+  if (legal_destination) {
+    lv_obj_remove_flag(move_markers[row][col], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_radius(move_markers[row][col], LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_color(move_markers[row][col], lv_color_hex(0x5D6F3A), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(move_markers[row][col], LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(move_markers[row][col], lv_color_hex(0x5D6F3A), LV_PART_MAIN);
+
+    if (capture_destination) {
+      lv_obj_set_size(move_markers[row][col], 50, 50);
+      lv_obj_set_style_bg_opa(move_markers[row][col], LV_OPA_TRANSP, LV_PART_MAIN);
+      lv_obj_set_style_border_width(move_markers[row][col], 4, LV_PART_MAIN);
+    } else {
+      lv_obj_set_size(move_markers[row][col], 15, 15);
+      lv_obj_set_style_bg_opa(move_markers[row][col], LV_OPA_60, LV_PART_MAIN);
+      lv_obj_set_style_border_width(move_markers[row][col], 0, LV_PART_MAIN);
+    }
+    lv_obj_center(move_markers[row][col]);
+  } else {
+    lv_obj_add_flag(move_markers[row][col], LV_OBJ_FLAG_HIDDEN);
+  }
 
   const char piece = board[row][col];
   const bool white_piece = is_white_piece(piece);
@@ -345,12 +357,12 @@ void paint_square(int row, int col) {
 
   if (col == 0) {
     lv_obj_set_style_text_color(rank_labels[row],
-                                is_light_square(row, col) ? lv_color_hex(0x4F7EA5) : lv_color_hex(0xEEEED2),
+                                light_square ? lv_color_hex(0x4F7EA5) : lv_color_hex(0xEEEED2),
                                 LV_PART_MAIN);
   }
   if (row == 7) {
     lv_obj_set_style_text_color(file_labels[col],
-                                is_light_square(row, col) ? lv_color_hex(0x4F7EA5) : lv_color_hex(0xEEEED2),
+                                light_square ? lv_color_hex(0x4F7EA5) : lv_color_hex(0xEEEED2),
                                 LV_PART_MAIN);
   }
 }
@@ -476,6 +488,12 @@ void create_chessboard() {
       lv_obj_set_style_radius(square, 0, LV_PART_MAIN);
       lv_obj_add_flag(square, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_add_event_cb(square, on_square_clicked, LV_EVENT_CLICKED, &square_ids[id]);
+
+      lv_obj_t *marker = lv_obj_create(square);
+      move_markers[row][col] = marker;
+      lv_obj_remove_style_all(marker);
+      lv_obj_add_flag(marker, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(marker, LV_OBJ_FLAG_CLICKABLE);
 
       lv_obj_t *label = lv_label_create(square);
       piece_labels[row][col] = label;
