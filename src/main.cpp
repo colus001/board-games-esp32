@@ -6,11 +6,12 @@ LV_FONT_DECLARE(chess_symbols_42);
 
 namespace {
 constexpr int kScreenPixels = 480;
-constexpr int kStatusHeight = 24;
-constexpr int kBoardPixels = 456;
+constexpr int kStatusHeight = 32;
+constexpr int kBoardPixels = kScreenPixels - kStatusHeight;
 constexpr int kSquarePixels = kBoardPixels / 8;
 constexpr int kBoardOffsetX = (kScreenPixels - kBoardPixels) / 2;
 constexpr int kBoardOffsetY = 0;
+constexpr int kHudOffsetY = kBoardOffsetY + kBoardPixels;
 
 lv_obj_t *board_frame = nullptr;
 lv_obj_t *squares[8][8];
@@ -19,6 +20,7 @@ lv_obj_t *piece_labels[8][8];
 lv_obj_t *rank_labels[8];
 lv_obj_t *file_labels[8];
 lv_obj_t *status_label = nullptr;
+lv_obj_t *resign_overlay = nullptr;
 uint8_t square_ids[64];
 
 void show_start_screen();
@@ -466,14 +468,32 @@ lv_obj_t *create_menu_button(lv_obj_t *parent, const char *text, int width, int 
   lv_obj_remove_style_all(button);
   lv_obj_set_size(button, width, height);
   lv_obj_set_style_radius(button, 12, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(button, lv_color_hex(0x5E7B62), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(button, lv_color_hex(0x34495E), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(button, 2, LV_PART_MAIN);
-  lv_obj_set_style_border_color(button, lv_color_hex(0xD7C59A), LV_PART_MAIN);
+  lv_obj_set_style_border_color(button, lv_color_hex(0x9FBAD0), LV_PART_MAIN);
 
   lv_obj_t *label = lv_label_create(button);
   lv_label_set_text(label, text);
   lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(label, lv_color_hex(0xF8F1DC), LV_PART_MAIN);
+  lv_obj_center(label);
+  return button;
+}
+
+lv_obj_t *create_small_button(lv_obj_t *parent, const char *text, int width, int height) {
+  lv_obj_t *button = lv_button_create(parent);
+  lv_obj_remove_style_all(button);
+  lv_obj_set_size(button, width, height);
+  lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(button, lv_color_hex(0x34495E), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(button, 1, LV_PART_MAIN);
+  lv_obj_set_style_border_color(button, lv_color_hex(0x9FBAD0), LV_PART_MAIN);
+
+  lv_obj_t *label = lv_label_create(button);
+  lv_label_set_text(label, text);
+  lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_set_style_text_color(label, lv_color_hex(0xF8F1DC), LV_PART_MAIN);
   lv_obj_center(label);
   return button;
@@ -497,7 +517,7 @@ void show_game_over_overlay() {
   lv_obj_set_style_bg_color(panel, lv_color_hex(0xF1E1BB), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(panel, 4, LV_PART_MAIN);
-  lv_obj_set_style_border_color(panel, lv_color_hex(0x5E7B62), LV_PART_MAIN);
+  lv_obj_set_style_border_color(panel, lv_color_hex(0x34495E), LV_PART_MAIN);
 
   lv_obj_t *title = lv_label_create(panel);
   lv_label_set_text(title, game_over_title);
@@ -518,6 +538,87 @@ void show_game_over_overlay() {
   lv_obj_t *title_button = create_menu_button(panel, "Title", 142, 52);
   lv_obj_align(title_button, LV_ALIGN_BOTTOM_RIGHT, -26, -24);
   lv_obj_add_event_cb(title_button, on_title_clicked, LV_EVENT_CLICKED, nullptr);
+}
+
+void finish_by_resignation() {
+  const bool white_resigned = white_turn;
+  clear_selection();
+  game_over = true;
+  game_over_title = "Resignation";
+  game_over_subtitle = white_resigned ? "Black wins" : "White wins";
+  status_message = white_resigned ? "White resigned" : "Black resigned";
+
+  if (resign_overlay != nullptr) {
+    lv_obj_delete(resign_overlay);
+    resign_overlay = nullptr;
+  }
+
+  repaint_board();
+  show_game_over_overlay();
+}
+
+void on_cancel_resign_clicked(lv_event_t *event) {
+  (void)event;
+  if (resign_overlay != nullptr) {
+    lv_obj_delete(resign_overlay);
+    resign_overlay = nullptr;
+  }
+}
+
+void on_confirm_resign_clicked(lv_event_t *event) {
+  (void)event;
+  finish_by_resignation();
+}
+
+void show_resign_confirm_overlay() {
+  if (game_over || resign_overlay != nullptr) {
+    return;
+  }
+
+  lv_obj_t *screen = lv_screen_active();
+  resign_overlay = lv_obj_create(screen);
+  lv_obj_remove_style_all(resign_overlay);
+  lv_obj_set_size(resign_overlay, kScreenPixels, kScreenPixels);
+  lv_obj_set_pos(resign_overlay, 0, 0);
+  lv_obj_set_style_bg_color(resign_overlay, lv_color_hex(0x11110F), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(resign_overlay, LV_OPA_50, LV_PART_MAIN);
+  lv_obj_add_flag(resign_overlay, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *panel = lv_obj_create(resign_overlay);
+  lv_obj_remove_style_all(panel);
+  lv_obj_set_size(panel, 340, 202);
+  lv_obj_center(panel);
+  lv_obj_set_style_radius(panel, 18, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(panel, lv_color_hex(0xF1E1BB), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(panel, 4, LV_PART_MAIN);
+  lv_obj_set_style_border_color(panel, lv_color_hex(0x34495E), LV_PART_MAIN);
+
+  lv_obj_t *title = lv_label_create(panel);
+  lv_label_set_text(title, "Resign?");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);
+  lv_obj_set_style_text_color(title, lv_color_hex(0x263526), LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
+
+  lv_obj_t *message = lv_label_create(panel);
+  lv_label_set_text(message, white_turn ? "White resigns" : "Black resigns");
+  lv_obj_set_style_text_font(message, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(message, lv_color_hex(0x5E3F2A), LV_PART_MAIN);
+  lv_obj_align(message, LV_ALIGN_TOP_MID, 0, 64);
+
+  lv_obj_t *cancel = create_menu_button(panel, "Cancel", 132, 50);
+  lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 28, -22);
+  lv_obj_add_event_cb(cancel, on_cancel_resign_clicked, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *resign = create_menu_button(panel, "Resign", 132, 50);
+  lv_obj_align(resign, LV_ALIGN_BOTTOM_RIGHT, -28, -22);
+  lv_obj_set_style_bg_color(resign, lv_color_hex(0x8A4B3D), LV_PART_MAIN);
+  lv_obj_add_event_cb(resign, on_confirm_resign_clicked, LV_EVENT_CLICKED, nullptr);
+}
+
+void on_resign_clicked(lv_event_t *event) {
+  (void)event;
+  show_resign_confirm_overlay();
 }
 
 void on_square_clicked(lv_event_t *event) {
@@ -568,7 +669,7 @@ void on_square_clicked(lv_event_t *event) {
 void show_start_screen() {
   lv_obj_t *screen = lv_screen_active();
   lv_obj_clean(screen);
-  lv_obj_set_style_bg_color(screen, lv_color_hex(0x2F4F3D), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(screen, lv_color_hex(0x17202A), LV_PART_MAIN);
 
   lv_obj_t *card = lv_obj_create(screen);
   lv_obj_remove_style_all(card);
@@ -578,7 +679,7 @@ void show_start_screen() {
   lv_obj_set_style_bg_color(card, lv_color_hex(0xF1E1BB), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(card, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(card, 4, LV_PART_MAIN);
-  lv_obj_set_style_border_color(card, lv_color_hex(0xB98B61), LV_PART_MAIN);
+  lv_obj_set_style_border_color(card, lv_color_hex(0x9FBAD0), LV_PART_MAIN);
 
   lv_obj_t *title = lv_label_create(card);
   lv_label_set_text(title, "Local Chess");
@@ -605,7 +706,7 @@ void show_start_screen() {
   lv_obj_t *hint = lv_label_create(card);
   lv_label_set_text(hint, "White moves first");
   lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x5E7B62), LV_PART_MAIN);
+  lv_obj_set_style_text_color(hint, lv_color_hex(0x34495E), LV_PART_MAIN);
   lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -24);
 }
 
@@ -617,7 +718,7 @@ void create_chessboard() {
 
   lv_obj_t *screen = lv_screen_active();
   lv_obj_clean(screen);
-  lv_obj_set_style_bg_color(screen, lv_color_hex(0x2F4F3D), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(screen, lv_color_hex(0x17202A), LV_PART_MAIN);
 
   board_frame = lv_obj_create(screen);
   lv_obj_remove_style_all(board_frame);
@@ -675,13 +776,17 @@ void create_chessboard() {
   }
 
   status_label = lv_label_create(screen);
-  lv_obj_set_width(status_label, kScreenPixels);
-  lv_obj_set_style_bg_color(status_label, lv_color_hex(0x2F4F3D), LV_PART_MAIN);
+  lv_obj_set_width(status_label, 372);
+  lv_obj_set_style_bg_color(status_label, lv_color_hex(0x17202A), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_label, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_text_color(status_label, lv_color_hex(0xF8FAFC), LV_PART_MAIN);
-  lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -7);
+  lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+  lv_obj_set_pos(status_label, 12, kHudOffsetY + 7);
   lv_obj_remove_flag(status_label, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *resign_button = create_small_button(screen, "Resign", 84, 24);
+  lv_obj_set_pos(resign_button, kScreenPixels - 94, kHudOffsetY + 4);
+  lv_obj_add_event_cb(resign_button, on_resign_clicked, LV_EVENT_CLICKED, nullptr);
 
   repaint_board();
   Serial.println("Chessboard UI created");
