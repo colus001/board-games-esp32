@@ -1,6 +1,10 @@
 .pio/
 .DS_Store
 *.log
+include/secrets.h
+node_modules/
+.wrangler/
+worker/.wrangler/
 
 # Vendored Sunton board definitions: keep only the board used by this project.
 boards/*
