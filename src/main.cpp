@@ -67,6 +67,10 @@ void update_lichess_progress(const char *stage, const char *detail);
 
 int selected_row = -1;
 int selected_col = -1;
+int last_from_row = -1;
+int last_from_col = -1;
+int last_to_row = -1;
+int last_to_col = -1;
 bool white_turn = true;
 bool game_over = false;
 GameMode game_mode = GameMode::Local;
@@ -180,6 +184,10 @@ void reset_game() {
   reset_board_position();
   selected_row = -1;
   selected_col = -1;
+  last_from_row = -1;
+  last_from_col = -1;
+  last_to_row = -1;
+  last_to_col = -1;
   white_turn = true;
   game_over = false;
   game_mode = GameMode::Local;
@@ -429,6 +437,46 @@ int rank_to_row(char rank) {
   return '8' - rank;
 }
 
+void clear_last_move() {
+  last_from_row = -1;
+  last_from_col = -1;
+  last_to_row = -1;
+  last_to_col = -1;
+}
+
+void set_last_move(int from_row, int from_col, int to_row, int to_col) {
+  last_from_row = from_row;
+  last_from_col = from_col;
+  last_to_row = to_row;
+  last_to_col = to_col;
+}
+
+void set_last_move_from_uci(const String &move) {
+  if (move.length() < 4) {
+    clear_last_move();
+    return;
+  }
+
+  const int from_col = file_to_col(move[0]);
+  const int from_row = rank_to_row(move[1]);
+  const int to_col = file_to_col(move[2]);
+  const int to_row = rank_to_row(move[3]);
+  if (from_row < 0 || from_row > 7 || from_col < 0 || from_col > 7 || to_row < 0 || to_row > 7 || to_col < 0 || to_col > 7) {
+    clear_last_move();
+    return;
+  }
+
+  set_last_move(from_row, from_col, to_row, to_col);
+}
+
+bool is_last_move_from_square(int row, int col) {
+  return row == last_from_row && col == last_from_col;
+}
+
+bool is_last_move_to_square(int row, int col) {
+  return row == last_to_row && col == last_to_col;
+}
+
 String uci_from_move(int from_row, int from_col, int to_row, int to_col) {
   String move;
   move += char('a' + from_col);
@@ -487,6 +535,7 @@ void apply_lichess_moves(const String &moves) {
   reset_board_position();
   int move_count = 0;
   int start = 0;
+  String last_move;
 
   while (start < moves.length()) {
     while (start < moves.length() && moves[start] == ' ') {
@@ -499,12 +548,18 @@ void apply_lichess_moves(const String &moves) {
     if (end < 0) {
       end = moves.length();
     }
-    apply_uci_move(moves.substring(start, end));
+    last_move = moves.substring(start, end);
+    apply_uci_move(last_move);
     ++move_count;
     start = end + 1;
   }
 
   clear_selection();
+  if (move_count > 0) {
+    set_last_move_from_uci(last_move);
+  } else {
+    clear_last_move();
+  }
   white_turn = (move_count % 2) == 0;
   lichess_my_turn = white_turn == lichess_is_white;
   set_lichess_turn_status();
@@ -1479,6 +1534,8 @@ void update_status() {
 
 void paint_square(int row, int col) {
   const bool selected = row == selected_row && col == selected_col;
+  const bool last_move_from = is_last_move_from_square(row, col);
+  const bool last_move_to = is_last_move_to_square(row, col);
   const bool legal_destination = is_legal_destination(row, col);
   const bool capture_destination = legal_destination && board[row][col] != '.';
   const bool light_square = is_light_square(row, col);
@@ -1490,7 +1547,13 @@ void paint_square(int row, int col) {
 
   lv_obj_set_style_bg_color(squares[row][col], color, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(squares[row][col], LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(squares[row][col], 0, LV_PART_MAIN);
+  if (!selected && (last_move_from || last_move_to)) {
+    lv_obj_set_style_border_width(squares[row][col], last_move_to ? 4 : 3, LV_PART_MAIN);
+    lv_obj_set_style_border_color(squares[row][col], lv_color_hex(0xE6C85C), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(squares[row][col], last_move_to ? LV_OPA_90 : LV_OPA_70, LV_PART_MAIN);
+  } else {
+    lv_obj_set_style_border_width(squares[row][col], 0, LV_PART_MAIN);
+  }
 
   if (legal_destination) {
     lv_obj_remove_flag(move_markers[row][col], LV_OBJ_FLAG_HIDDEN);
@@ -1564,6 +1627,7 @@ void select_square(int row, int col) {
 void move_piece(int from_row, int from_col, int to_row, int to_col) {
   board[to_row][to_col] = board[from_row][from_col];
   board[from_row][from_col] = '.';
+  set_last_move(from_row, from_col, to_row, to_col);
   white_turn = !white_turn;
   clear_selection();
 
