@@ -6,6 +6,10 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
+#include "common/ui_widgets.h"
+#include "common/utils.h"
+#include "games/chess/chess_ai.h"
+#include "games/chess/chess_core.h"
 #include "secrets.h"
 
 #ifndef PAIRING_BASE_URL
@@ -39,15 +43,6 @@ lv_obj_t *lichess_progress_log_label = nullptr;
 uint8_t square_ids[64];
 
 enum class GameMode { Local, Ai, Lichess };
-enum class AiDifficulty { Easy, Normal, Hard };
-
-struct ChessMove {
-  int from_row = -1;
-  int from_col = -1;
-  int to_row = -1;
-  int to_col = -1;
-  int score = -32000;
-};
 
 void show_start_screen();
 void create_chessboard();
@@ -111,10 +106,6 @@ int lichess_last_move_http_code = 0;
 bool lichess_stream_headers_done = false;
 bool lichess_is_white = true;
 bool lichess_my_turn = false;
-AiDifficulty ai_difficulty = AiDifficulty::Normal;
-int ai_search_depth = 2;
-int ai_min_think_ms = 800;
-uint32_t ai_search_nodes = 0;
 
 enum class SeekStatus {
   Matched,
@@ -136,23 +127,6 @@ struct SeekResult {
   int http_code = 0;
 };
 
-constexpr int kMaxAiMoves = 128;
-constexpr int kMaxAiSearchDepth = 3;
-ChessMove ai_move_buffers[kMaxAiSearchDepth + 2][kMaxAiMoves];
-
-const char kInitialBoard[8][8] = {
-    {'r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'},
-    {'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'},
-    {'.', '.', '.', '.', '.', '.', '.', '.'},
-    {'.', '.', '.', '.', '.', '.', '.', '.'},
-    {'.', '.', '.', '.', '.', '.', '.', '.'},
-    {'.', '.', '.', '.', '.', '.', '.', '.'},
-    {'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'},
-    {'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'},
-};
-
-char board[8][8];
-
 void load_config() {
   preferences.begin("localchess", true);
   configured_wifi_ssid = preferences.getString("wifi_ssid", WIFI_SSID);
@@ -170,14 +144,6 @@ void save_config(const String &ssid, const String &password, const String &token
   configured_wifi_ssid = ssid;
   configured_wifi_password = password;
   configured_lichess_token = token;
-}
-
-void reset_board_position() {
-  for (int row = 0; row < 8; ++row) {
-    for (int col = 0; col < 8; ++col) {
-      board[row][col] = kInitialBoard[row][col];
-    }
-  }
 }
 
 void reset_game() {
@@ -227,92 +193,15 @@ void start_local_game() {
   create_chessboard();
 }
 
-const char *ai_thinking_text() {
-  switch (ai_difficulty) {
-  case AiDifficulty::Easy:
-    return "AI thinking... Easy";
-  case AiDifficulty::Normal:
-    return "AI thinking... Normal";
-  case AiDifficulty::Hard:
-    return "AI thinking... Hard";
-  }
-  return "AI thinking...";
-}
-
-void set_ai_difficulty(AiDifficulty difficulty) {
-  ai_difficulty = difficulty;
-  switch (difficulty) {
-  case AiDifficulty::Easy:
-    ai_search_depth = 1;
-    ai_min_think_ms = 300;
-    break;
-  case AiDifficulty::Normal:
-    ai_search_depth = 2;
-    ai_min_think_ms = 800;
-    break;
-  case AiDifficulty::Hard:
-    ai_search_depth = 3;
-    ai_min_think_ms = 1500;
-    break;
-  }
-}
-
 void start_ai_game() {
   reset_game();
   game_mode = GameMode::Ai;
-  switch (ai_difficulty) {
-  case AiDifficulty::Easy:
-    status_message = "White vs AI Easy";
-    break;
-  case AiDifficulty::Normal:
-    status_message = "White vs AI Normal";
-    break;
-  case AiDifficulty::Hard:
-    status_message = "White vs AI Hard";
-    break;
-  }
+  status_message = ai_game_status_text();
   create_chessboard();
-}
-
-bool is_light_square(int row, int col) {
-  return ((row + col) % 2) == 0;
-}
-
-bool is_white_piece(char piece) {
-  return piece >= 'A' && piece <= 'Z';
-}
-
-bool is_black_piece(char piece) {
-  return piece >= 'a' && piece <= 'z';
 }
 
 bool is_current_turn_piece(char piece) {
   return white_turn ? is_white_piece(piece) : is_black_piece(piece);
-}
-
-bool same_side(char a, char b) {
-  return (is_white_piece(a) && is_white_piece(b)) || (is_black_piece(a) && is_black_piece(b));
-}
-
-char lower_piece(char piece) {
-  if (piece >= 'A' && piece <= 'Z') {
-    return piece - 'A' + 'a';
-  }
-  return piece;
-}
-
-int abs_int(int value) {
-  return value < 0 ? -value : value;
-}
-
-int sign_int(int value) {
-  if (value > 0) {
-    return 1;
-  }
-  if (value < 0) {
-    return -1;
-  }
-  return 0;
 }
 
 const char *piece_text(char piece) {
@@ -346,33 +235,6 @@ const char *piece_text(char piece) {
   }
 }
 
-String lower_string(String value) {
-  value.toLowerCase();
-  return value;
-}
-
-String json_string_value(const String &json, const char *key) {
-  String needle = String("\"") + key + "\":\"";
-  int start = json.indexOf(needle);
-  if (start < 0) {
-    return "";
-  }
-  start += needle.length();
-  const int end = json.indexOf('"', start);
-  if (end < 0) {
-    return "";
-  }
-  return json.substring(start, end);
-}
-
-bool json_has_string_key(const String &json, const char *key) {
-  return json.indexOf(String("\"") + key + "\":\"") >= 0;
-}
-
-bool json_has_status(const String &json, const char *status) {
-  return json.indexOf(String("\"status\":\"") + status + "\"") >= 0;
-}
-
 void set_dynamic_status(const String &message) {
   lichess_status_text = message;
   status_message = lichess_status_text.c_str();
@@ -386,23 +248,6 @@ void set_lichess_turn_status() {
   } else {
     set_dynamic_status(String("You: ") + side + " | " + turn + " to move");
   }
-}
-
-String compact_error_detail(const String &body) {
-  String detail = json_string_value(body, "error");
-  if (detail.length() == 0) {
-    detail = json_string_value(body, "message");
-  }
-  if (detail.length() == 0) {
-    detail = body;
-  }
-  detail.replace("\n", " ");
-  detail.replace("\r", " ");
-  detail.trim();
-  if (detail.length() > 90) {
-    detail = detail.substring(0, 90);
-  }
-  return detail;
 }
 
 bool wifi_configured() {
@@ -490,47 +335,6 @@ String uci_from_move(int from_row, int from_col, int to_row, int to_col) {
   return move;
 }
 
-void apply_uci_move(const String &move) {
-  if (move.length() < 4) {
-    return;
-  }
-
-  const int from_col = file_to_col(move[0]);
-  const int from_row = rank_to_row(move[1]);
-  const int to_col = file_to_col(move[2]);
-  const int to_row = rank_to_row(move[3]);
-  if (from_row < 0 || from_row > 7 || from_col < 0 || from_col > 7 || to_row < 0 || to_row > 7 || to_col < 0 || to_col > 7) {
-    return;
-  }
-
-  char piece = board[from_row][from_col];
-  if (piece == '.') {
-    return;
-  }
-
-  if (lower_piece(piece) == 'p' && from_col != to_col && board[to_row][to_col] == '.') {
-    board[from_row][to_col] = '.';
-  }
-
-  if (lower_piece(piece) == 'k' && abs_int(to_col - from_col) == 2) {
-    if (to_col == 6) {
-      board[from_row][5] = board[from_row][7];
-      board[from_row][7] = '.';
-    } else if (to_col == 2) {
-      board[from_row][3] = board[from_row][0];
-      board[from_row][0] = '.';
-    }
-  }
-
-  if (move.length() >= 5 && lower_piece(piece) == 'p') {
-    const char promotion = lower_piece(move[4]);
-    piece = is_white_piece(piece) ? promotion - 'a' + 'A' : promotion;
-  }
-
-  board[to_row][to_col] = piece;
-  board[from_row][from_col] = '.';
-}
-
 void apply_lichess_moves(const String &moves) {
   reset_board_position();
   int move_count = 0;
@@ -563,338 +367,6 @@ void apply_lichess_moves(const String &moves) {
   white_turn = (move_count % 2) == 0;
   lichess_my_turn = white_turn == lichess_is_white;
   set_lichess_turn_status();
-}
-
-bool is_path_clear(int from_row, int from_col, int to_row, int to_col) {
-  const int row_step = sign_int(to_row - from_row);
-  const int col_step = sign_int(to_col - from_col);
-  int row = from_row + row_step;
-  int col = from_col + col_step;
-
-  while (row != to_row || col != to_col) {
-    if (board[row][col] != '.') {
-      return false;
-    }
-    row += row_step;
-    col += col_step;
-  }
-
-  return true;
-}
-
-bool is_legal_pawn_move(char piece, int from_row, int from_col, int to_row, int to_col) {
-  const int direction = is_white_piece(piece) ? -1 : 1;
-  const int start_row = is_white_piece(piece) ? 6 : 1;
-  const int row_delta = to_row - from_row;
-  const int col_delta = to_col - from_col;
-  const char target = board[to_row][to_col];
-
-  if (col_delta == 0 && row_delta == direction && target == '.') {
-    return true;
-  }
-
-  if (col_delta == 0 && from_row == start_row && row_delta == direction * 2 && target == '.') {
-    return board[from_row + direction][from_col] == '.';
-  }
-
-  if (abs_int(col_delta) == 1 && row_delta == direction && target != '.' && !same_side(piece, target)) {
-    return true;
-  }
-
-  return false;
-}
-
-bool find_king(bool white, int *king_row, int *king_col) {
-  const char king = white ? 'K' : 'k';
-  for (int row = 0; row < 8; ++row) {
-    for (int col = 0; col < 8; ++col) {
-      if (board[row][col] == king) {
-        *king_row = row;
-        *king_col = col;
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool is_legal_basic_move(int from_row, int from_col, int to_row, int to_col) {
-  const char piece = board[from_row][from_col];
-  const char target = board[to_row][to_col];
-  const int row_delta = to_row - from_row;
-  const int col_delta = to_col - from_col;
-  const int abs_row = abs_int(row_delta);
-  const int abs_col = abs_int(col_delta);
-
-  if (piece == '.' || (from_row == to_row && from_col == to_col)) {
-    return false;
-  }
-
-  if (target != '.' && same_side(piece, target)) {
-    return false;
-  }
-
-  if (lower_piece(target) == 'k') {
-    return false;
-  }
-
-  switch (lower_piece(piece)) {
-  case 'p':
-    return is_legal_pawn_move(piece, from_row, from_col, to_row, to_col);
-  case 'r':
-    return (row_delta == 0 || col_delta == 0) && is_path_clear(from_row, from_col, to_row, to_col);
-  case 'n':
-    return (abs_row == 2 && abs_col == 1) || (abs_row == 1 && abs_col == 2);
-  case 'b':
-    return abs_row == abs_col && is_path_clear(from_row, from_col, to_row, to_col);
-  case 'q':
-    return ((row_delta == 0 || col_delta == 0) || (abs_row == abs_col)) &&
-           is_path_clear(from_row, from_col, to_row, to_col);
-  case 'k':
-    return abs_row <= 1 && abs_col <= 1;
-  default:
-    return false;
-  }
-}
-
-bool piece_attacks_square(int from_row, int from_col, int to_row, int to_col) {
-  const char piece = board[from_row][from_col];
-  const int row_delta = to_row - from_row;
-  const int col_delta = to_col - from_col;
-  const int abs_row = abs_int(row_delta);
-  const int abs_col = abs_int(col_delta);
-
-  if (piece == '.' || (from_row == to_row && from_col == to_col)) {
-    return false;
-  }
-
-  switch (lower_piece(piece)) {
-  case 'p': {
-    const int direction = is_white_piece(piece) ? -1 : 1;
-    return row_delta == direction && abs_col == 1;
-  }
-  case 'r':
-    return (row_delta == 0 || col_delta == 0) && is_path_clear(from_row, from_col, to_row, to_col);
-  case 'n':
-    return (abs_row == 2 && abs_col == 1) || (abs_row == 1 && abs_col == 2);
-  case 'b':
-    return abs_row == abs_col && is_path_clear(from_row, from_col, to_row, to_col);
-  case 'q':
-    return ((row_delta == 0 || col_delta == 0) || (abs_row == abs_col)) &&
-           is_path_clear(from_row, from_col, to_row, to_col);
-  case 'k':
-    return abs_row <= 1 && abs_col <= 1;
-  default:
-    return false;
-  }
-}
-
-bool is_square_attacked(int row, int col, bool by_white) {
-  for (int from_row = 0; from_row < 8; ++from_row) {
-    for (int from_col = 0; from_col < 8; ++from_col) {
-      const char piece = board[from_row][from_col];
-      if (piece == '.') {
-        continue;
-      }
-      if (by_white != is_white_piece(piece)) {
-        continue;
-      }
-      if (piece_attacks_square(from_row, from_col, row, col)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool is_in_check(bool white) {
-  int king_row = -1;
-  int king_col = -1;
-  if (!find_king(white, &king_row, &king_col)) {
-    return true;
-  }
-  return is_square_attacked(king_row, king_col, !white);
-}
-
-bool would_leave_king_in_check(int from_row, int from_col, int to_row, int to_col) {
-  const char moving_piece = board[from_row][from_col];
-  const char captured_piece = board[to_row][to_col];
-  const bool moving_white = is_white_piece(moving_piece);
-
-  board[to_row][to_col] = moving_piece;
-  board[from_row][from_col] = '.';
-  const bool in_check = is_in_check(moving_white);
-  board[from_row][from_col] = moving_piece;
-  board[to_row][to_col] = captured_piece;
-
-  return in_check;
-}
-
-bool is_legal_move(int from_row, int from_col, int to_row, int to_col) {
-  return is_legal_basic_move(from_row, from_col, to_row, to_col) &&
-         !would_leave_king_in_check(from_row, from_col, to_row, to_col);
-}
-
-bool has_any_legal_move(bool white) {
-  for (int from_row = 0; from_row < 8; ++from_row) {
-    for (int from_col = 0; from_col < 8; ++from_col) {
-      const char piece = board[from_row][from_col];
-      if (piece == '.' || is_white_piece(piece) != white) {
-        continue;
-      }
-      for (int to_row = 0; to_row < 8; ++to_row) {
-        for (int to_col = 0; to_col < 8; ++to_col) {
-          if (is_legal_move(from_row, from_col, to_row, to_col)) {
-            return true;
-          }
-        }
-      }
-    }
-  }
-  return false;
-}
-
-int piece_value(char piece) {
-  switch (lower_piece(piece)) {
-  case 'p':
-    return 100;
-  case 'n':
-    return 320;
-  case 'b':
-    return 330;
-  case 'r':
-    return 500;
-  case 'q':
-    return 900;
-  case 'k':
-    return 20000;
-  default:
-    return 0;
-  }
-}
-
-int center_bonus(int row, int col) {
-  const int row_dist = abs_int(3 - row) < abs_int(4 - row) ? abs_int(3 - row) : abs_int(4 - row);
-  const int col_dist = abs_int(3 - col) < abs_int(4 - col) ? abs_int(3 - col) : abs_int(4 - col);
-  return 14 - (row_dist + col_dist) * 3;
-}
-
-int evaluate_position_for(bool white) {
-  int score = 0;
-  for (int row = 0; row < 8; ++row) {
-    for (int col = 0; col < 8; ++col) {
-      const char piece = board[row][col];
-      if (piece == '.') {
-        continue;
-      }
-      int value = piece_value(piece);
-      if (lower_piece(piece) != 'k') {
-        value += center_bonus(row, col);
-      }
-      score += is_white_piece(piece) == white ? value : -value;
-    }
-  }
-  return score;
-}
-
-char apply_temp_move(const ChessMove &move) {
-  const char captured = board[move.to_row][move.to_col];
-  board[move.to_row][move.to_col] = board[move.from_row][move.from_col];
-  board[move.from_row][move.from_col] = '.';
-  return captured;
-}
-
-void undo_temp_move(const ChessMove &move, char captured) {
-  board[move.from_row][move.from_col] = board[move.to_row][move.to_col];
-  board[move.to_row][move.to_col] = captured;
-}
-
-int generate_legal_moves(bool white, ChessMove moves[], int max_moves) {
-  int count = 0;
-  for (int from_row = 0; from_row < 8; ++from_row) {
-    for (int from_col = 0; from_col < 8; ++from_col) {
-      const char piece = board[from_row][from_col];
-      if (piece == '.' || is_white_piece(piece) != white) {
-        continue;
-      }
-      for (int to_row = 0; to_row < 8; ++to_row) {
-        for (int to_col = 0; to_col < 8; ++to_col) {
-          if (!is_legal_move(from_row, from_col, to_row, to_col)) {
-            continue;
-          }
-          moves[count].from_row = from_row;
-          moves[count].from_col = from_col;
-          moves[count].to_row = to_row;
-          moves[count].to_col = to_col;
-          moves[count].score = piece_value(board[to_row][to_col]);
-          ++count;
-          if (count >= max_moves) {
-            return count;
-          }
-        }
-      }
-    }
-  }
-  return count;
-}
-
-int micromax_search(bool white, int depth, int alpha, int beta, int ply) {
-  ++ai_search_nodes;
-  if ((ai_search_nodes & 0x1FF) == 0) {
-    lv_timer_handler();
-    delay(0);
-  }
-
-  if (depth == 0) {
-    return evaluate_position_for(white);
-  }
-
-  ChessMove *moves = ai_move_buffers[ply];
-  const int count = generate_legal_moves(white, moves, kMaxAiMoves);
-  if (count == 0) {
-    return is_in_check(white) ? -30000 - depth : 0;
-  }
-
-  for (int i = 0; i < count; ++i) {
-    for (int j = i + 1; j < count; ++j) {
-      if (moves[j].score > moves[i].score) {
-        const ChessMove tmp = moves[i];
-        moves[i] = moves[j];
-        moves[j] = tmp;
-      }
-    }
-
-    const char captured = apply_temp_move(moves[i]);
-    const int score = -micromax_search(!white, depth - 1, -beta, -alpha, ply + 1);
-    undo_temp_move(moves[i], captured);
-    if (score > alpha) {
-      alpha = score;
-    }
-    if (alpha >= beta) {
-      break;
-    }
-  }
-  return alpha;
-}
-
-ChessMove choose_ai_move(bool white) {
-  ChessMove best;
-  ai_search_nodes = 0;
-  ChessMove *moves = ai_move_buffers[0];
-  const int count = generate_legal_moves(white, moves, kMaxAiMoves);
-  for (int i = 0; i < count; ++i) {
-    const char captured = apply_temp_move(moves[i]);
-    int score = -micromax_search(!white, ai_search_depth, -32000, 32000, 1);
-    undo_temp_move(moves[i], captured);
-    if (ai_difficulty == AiDifficulty::Easy) {
-      score += random(-80, 81);
-    }
-    if (score > best.score) {
-      best = moves[i];
-      best.score = score;
-    }
-  }
-  return best;
 }
 
 bool connect_wifi() {
@@ -1007,14 +479,6 @@ void update_lichess_progress(const char *stage, const char *detail) {
   lichess_log(String(stage) + " - " + detail);
 }
 
-void pump_ui(uint32_t milliseconds) {
-  const uint32_t end_at = millis() + milliseconds;
-  while (millis() < end_at) {
-    lv_timer_handler();
-    delay(5);
-  }
-}
-
 bool load_lichess_account() {
   WiFiClientSecure client;
   client.setInsecure();
@@ -1062,36 +526,6 @@ const char *seek_status_text(const SeekResult &result) {
     return "Matched";
   }
   return "Match failed";
-}
-
-bool read_http_line(WiFiClientSecure &client, String &line, unsigned long timeout_ms) {
-  line = "";
-  const unsigned long started = millis();
-  while (millis() - started < timeout_ms) {
-    while (client.available()) {
-      const char c = client.read();
-      if (c == '\r') {
-        continue;
-      }
-      if (c == '\n') {
-        return true;
-      }
-      if (line.length() < 300) {
-        line += c;
-      }
-    }
-    lv_timer_handler();
-    delay(5);
-  }
-  return false;
-}
-
-int parse_http_status_code(const String &status_line) {
-  const int first_space = status_line.indexOf(' ');
-  if (first_space < 0 || first_space + 4 > status_line.length()) {
-    return 0;
-  }
-  return status_line.substring(first_space + 1, first_space + 4).toInt();
 }
 
 SeekResult seek_lichess_game() {
@@ -1659,7 +1093,7 @@ void make_ai_move_if_needed() {
 
   const unsigned long started = millis();
   const ChessMove ai_move = choose_ai_move(false);
-  while (millis() - started < static_cast<unsigned long>(ai_min_think_ms)) {
+  while (millis() - started < static_cast<unsigned long>(ai_minimum_think_ms())) {
     lv_timer_handler();
     delay(20);
   }
@@ -1712,60 +1146,6 @@ void on_title_clicked(lv_event_t *event) {
   stop_pair_poll_timer();
   reset_game();
   show_start_screen();
-}
-
-lv_obj_t *create_menu_button(lv_obj_t *parent, const char *text, int width, int height) {
-  lv_obj_t *button = lv_button_create(parent);
-  lv_obj_remove_style_all(button);
-  lv_obj_set_size(button, width, height);
-  lv_obj_set_style_radius(button, 12, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(button, lv_color_hex(0x34495E), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(button, 2, LV_PART_MAIN);
-  lv_obj_set_style_border_color(button, lv_color_hex(0x9FBAD0), LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(button, 8, LV_PART_MAIN);
-  lv_obj_set_style_shadow_ofs_y(button, 3, LV_PART_MAIN);
-  lv_obj_set_style_shadow_color(button, lv_color_hex(0x0B1117), LV_PART_MAIN);
-  lv_obj_set_style_shadow_opa(button, LV_OPA_30, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(button, lv_color_hex(0x22313F), LV_STATE_PRESSED);
-  lv_obj_set_style_border_color(button, lv_color_hex(0xD5E7F7), LV_STATE_PRESSED);
-  lv_obj_set_style_shadow_width(button, 2, LV_STATE_PRESSED);
-  lv_obj_set_style_shadow_ofs_y(button, 1, LV_STATE_PRESSED);
-  lv_obj_set_style_translate_y(button, 2, LV_STATE_PRESSED);
-
-  lv_obj_t *label = lv_label_create(button);
-  lv_label_set_text(label, text);
-  lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
-  lv_obj_set_style_text_color(label, lv_color_hex(0xF8F1DC), LV_PART_MAIN);
-  lv_obj_center(label);
-  return button;
-}
-
-lv_obj_t *create_small_button(lv_obj_t *parent, const char *text, int width, int height) {
-  lv_obj_t *button = lv_button_create(parent);
-  lv_obj_remove_style_all(button);
-  lv_obj_set_size(button, width, height);
-  lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(button, lv_color_hex(0x34495E), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(button, 1, LV_PART_MAIN);
-  lv_obj_set_style_border_color(button, lv_color_hex(0x9FBAD0), LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(button, 4, LV_PART_MAIN);
-  lv_obj_set_style_shadow_ofs_y(button, 2, LV_PART_MAIN);
-  lv_obj_set_style_shadow_color(button, lv_color_hex(0x0B1117), LV_PART_MAIN);
-  lv_obj_set_style_shadow_opa(button, LV_OPA_30, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(button, lv_color_hex(0x22313F), LV_STATE_PRESSED);
-  lv_obj_set_style_border_color(button, lv_color_hex(0xD5E7F7), LV_STATE_PRESSED);
-  lv_obj_set_style_shadow_width(button, 1, LV_STATE_PRESSED);
-  lv_obj_set_style_shadow_ofs_y(button, 0, LV_STATE_PRESSED);
-  lv_obj_set_style_translate_y(button, 1, LV_STATE_PRESSED);
-
-  lv_obj_t *label = lv_label_create(button);
-  lv_label_set_text(label, text);
-  lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_color(label, lv_color_hex(0xF8F1DC), LV_PART_MAIN);
-  lv_obj_center(label);
-  return button;
 }
 
 void show_ai_difficulty_screen() {
