@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+
+  "name": "local-chess-pairing",
+  "main": "src/index.js",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": true,
+
+  "routes": [
+    {
+      "pattern": "board-games.seokjun.kim",
+      "custom_domain": true,
+    },
+  ],
+
+  // Set these before deploy:
+  // npx wrangler secret put LICHESS_CLIENT_ID
+  // Optional, only if your Lichess OAuth app has a secret:
+  // npx wrangler secret put LICHESS_CLIENT_SECRET
+  // npx wrangler kv namespace create PAIRINGS
+  "kv_namespaces": [
+    {
+      "binding": "PAIRINGS",
+      "id": "ff51bd63ce57405d89ac32366a70956f",
+    },
+  ],
+
+  "vars": {
+    "PUBLIC_BASE_URL": "https://board-games.seokjun.kim",
+  },
+
+  "observability": {
+    "enabled": true,
+  },
+}

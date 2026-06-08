@@ -54,13 +54,13 @@ Create a Lichess OAuth app, then configure the Worker:
 
 ```bash
 cd worker
-wrangler kv namespace create PAIRINGS
-wrangler secret put LICHESS_CLIENT_ID
+npx wrangler kv namespace create PAIRINGS
+npx wrangler secret put LICHESS_CLIENT_ID
 # Optional, only if your Lichess OAuth app uses a secret:
-wrangler secret put LICHESS_CLIENT_SECRET
+npx wrangler secret put LICHESS_CLIENT_SECRET
 ```
 
-Update `worker/wrangler.toml`:
+Update `worker/wrangler.jsonc`:
 
 - Replace the KV namespace `id`
 - Set `PUBLIC_BASE_URL` to the deployed Worker URL
@@ -68,7 +68,7 @@ Update `worker/wrangler.toml`:
 Deploy:
 
 ```bash
-wrangler deploy
+npx wrangler deploy
 ```
 
 Configure the Lichess OAuth redirect URI to:
